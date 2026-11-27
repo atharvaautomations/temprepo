@@ -51,6 +51,13 @@ export class SchedulingService {
       throw new NotFoundException('Execution not found');
     }
 
+    // Prevent creating a schedule for an execution that has already started.
+    if (execution.status !== 'PENDING') {
+      throw new BadRequestException(
+        `Cannot create a schedule. Execution "${execution.executionCode}" is already ${execution.status.toLowerCase()}.`,
+      );
+    }
+
     const operator = await this.prisma.user.findUnique({
       where: { id: dto.operatorId },
     });
@@ -78,16 +85,12 @@ export class SchedulingService {
     const existingSchedule = await this.prisma.executionSchedule.findFirst({
       where: {
         executionId: dto.executionId,
-        scheduleDate: {
-          gte: startOfDay(scheduleDate),
-          lte: endOfDay(scheduleDate),
-        },
       },
     });
 
     if (existingSchedule) {
       throw new BadRequestException(
-        'This execution is already scheduled for the selected date'
+        `Execution "${execution.executionCode}" is already scheduled and cannot be rescheduled.`
       );
     }
 
@@ -249,6 +252,9 @@ export class SchedulingService {
       where: {
         status: {
           in: [ExecutionStatus.PENDING, ExecutionStatus.RUNNING],
+        },
+        schedules: {
+          none: {},
         },
       },
       include: {

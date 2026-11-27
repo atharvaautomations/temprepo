@@ -7,6 +7,7 @@ import {
   IngredientExecutionStatus,
   ExecutionStatus,
   BatchExecutionStatus,
+  ScheduleStatus,
   UserRole,
 } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
@@ -257,6 +258,15 @@ export class WeighingService {
       orderBy: {
         createdAt: 'desc',
       },
+      include: {
+        schedules: {
+          where: {
+            status: ScheduleStatus.PENDING,
+          },
+          orderBy: { scheduleDate: 'asc' },
+          take: 1,
+        },
+      },
     });
 
     return executions.map((execution) => ({
@@ -267,6 +277,9 @@ export class WeighingService {
       totalBatches: execution.totalBatches,
       status: execution.status,
       createdAt: execution.createdAt,
+      scheduledDate: execution.schedules?.[0]?.scheduleDate
+        ? new Date(execution.schedules[0].scheduleDate).toISOString().split('T')[0]
+        : null,
     }));
   }
 

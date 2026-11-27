@@ -871,9 +871,8 @@ model ActivityLog {
   status       String   @default("Success")
   errorMessage String?
   metadata     Json?
-  createdAt    DateTime @default(now())
-
   notifications Notification[] @relation("NotificationActivityLog")
+  createdAt    DateTime @default(now())
 
   @@index([createdAt])
   @@index([moduleType])

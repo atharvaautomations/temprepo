@@ -3,11 +3,12 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import api from '@/lib/api';
 import { toast } from '@/hooks/use-toast';
-import { ExecutionItem, RecipeOption } from '../types/execution';
+import { ExecutionItem, RecipeOption, ExecutionDetail } from '../types/execution';
 
 export const EXECUTION_QUERY_KEYS = {
   all: ['weighing-executions'] as const,
   list: ['weighing-executions', 'list'] as const,
+  detail: (id: number) => ['weighing-executions', 'detail', id] as const,
 };
 
 export function useExecution() {
@@ -17,16 +18,16 @@ export function useExecution() {
       const res = await api.get('/recipes');
       return Array.isArray(res.data)
         ? res.data.map((recipe: any) => ({
-          id: recipe.id.toString(),
-          recipeCode: recipe.recipeCode,
-          name: recipe.name,
-          ingredients: recipe.steps.flatMap((step: any) =>
-            step.ingredients.map((item: any) => ({
-              ingredientCode: item.ingredient.name,
-              quantity: item.quantity,
-            }))
-          ),
-        }))
+            id: recipe.id.toString(),
+            recipeCode: recipe.recipeCode,
+            name: recipe.name,
+            ingredients: recipe.steps.flatMap((step: any) =>
+              step.ingredients.map((item: any) => ({
+                ingredientCode: item.ingredient.name,
+                quantity: item.quantity,
+              }))
+            ),
+          }))
         : [];
     },
   });
@@ -37,12 +38,13 @@ export function useExecution() {
       const res = await api.get('/weighing/executions');
       return Array.isArray(res.data)
         ? res.data.map((item: any) => ({
-          id: item.id.toString(),
-          executionNumber: item.executionCode,
-          recipeName: item.recipeName,
-          batchCount: item.totalBatches,
-          status: item.status,
-        }))
+            id: item.id.toString(),
+            executionNumber: item.executionCode,
+            recipeName: item.recipeName,
+            batchCount: item.totalBatches,
+            status: item.status,
+            scheduledDate: item.scheduledDate ?? null,
+          }))
         : [];
     },
   });
@@ -51,6 +53,17 @@ export function useExecution() {
     recipes,
     executions,
   };
+}
+
+export function useExecutionDetail(executionId: number | null) {
+  return useQuery<ExecutionDetail>({
+    queryKey: EXECUTION_QUERY_KEYS.detail(executionId ?? 0),
+    queryFn: async () => {
+      const res = await api.get(`/executions/${executionId}/detail`);
+      return res.data;
+    },
+    enabled: !!executionId,
+  });
 }
 
 export function useCreateExecution() {

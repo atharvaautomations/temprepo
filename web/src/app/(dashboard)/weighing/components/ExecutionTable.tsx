@@ -16,6 +16,7 @@ interface ExecutionTableProps {
   onPrintBatch: (execution: ExecutionItem) => void;
   onEdit: (execution: ExecutionItem) => void;
   onDelete: (execution: ExecutionItem) => void;
+  onViewDetail: (execution: ExecutionItem) => void;
 }
 
 const statusStyles: Record<ExecutionStatus, string> = {
@@ -38,6 +39,7 @@ export function ExecutionTable({
   onPrintBatch,
   onEdit,
   onDelete,
+  onViewDetail,
 }: ExecutionTableProps) {
   const queryClient = useQueryClient();
   const [startingId, setStartingId] = useState<string | null>(null);
@@ -91,6 +93,9 @@ export function ExecutionTable({
                 Status
               </th>
               <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">
+                Scheduled Date
+              </th>
+              <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">
                 Actions
               </th>
             </tr>
@@ -103,7 +108,11 @@ export function ExecutionTable({
               const isStarting = startingId === execution.id;
 
               return (
-                <tr key={execution.id} className="hover:bg-gray-50">
+                <tr
+                  key={execution.id}
+                  className="hover:bg-gray-50 cursor-pointer"
+                  onClick={() => onViewDetail(execution)}
+                >
                   <td className="whitespace-nowrap px-6 py-4 text-sm font-semibold text-gray-900">
                     {execution.executionNumber}
                   </td>
@@ -122,6 +131,13 @@ export function ExecutionTable({
                       {statusLabels[execution.status]}
                     </span>
                   </td>
+                  <td className="whitespace-nowrap px-6 py-4 text-sm text-gray-700">
+                    {execution.scheduledDate ? (
+                      execution.scheduledDate
+                    ) : (
+                      <span className="text-gray-400">-</span>
+                    )}
+                  </td>
                   <td className="whitespace-nowrap px-6 py-4 text-sm">
                     <div className="flex flex-wrap items-center gap-2">
                       {isCreated && (
@@ -130,7 +146,10 @@ export function ExecutionTable({
                             size="sm"
                             className="gap-1 bg-green-600 text-white hover:bg-green-700"
                             disabled={isStarting}
-                            onClick={() => handleStart(execution)}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleStart(execution);
+                            }}
                           >
                             {isStarting ? (
                               <Loader2 className="h-4 w-4 animate-spin" />
@@ -144,7 +163,10 @@ export function ExecutionTable({
                             variant="outline"
                             size="icon"
                             className="border-amber-200 text-amber-600 hover:bg-amber-50"
-                            onClick={() => onEdit(execution)}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onEdit(execution);
+                            }}
                           >
                             <Pencil className="h-4 w-4" />
                           </Button>
@@ -153,7 +175,10 @@ export function ExecutionTable({
                             variant="outline"
                             size="icon"
                             className="border-red-200 text-red-600 hover:bg-red-50"
-                            onClick={() => onDelete(execution)}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onDelete(execution);
+                            }}
                           >
                             <Trash2 className="h-4 w-4" />
                           </Button>
@@ -161,12 +186,15 @@ export function ExecutionTable({
                       )}
 
                       {(isRunning || isCompleted) && (
-                        <Button
-                          variant="outline"
-                          size="icon"
-                          className="border-blue-200 text-blue-600 hover:bg-blue-50"
-                          onClick={() => onPrintAll(execution)}
-                        >
+                          <Button
+                            variant="outline"
+                            size="icon"
+                            className="border-blue-200 text-blue-600 hover:bg-blue-50"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onPrintAll(execution);
+                            }}
+                          >
                           <QrCode className="h-4 w-4" />
                         </Button>
                       )}

@@ -139,12 +139,14 @@ export function AddScheduleDialog({
                 <SelectValue placeholder="Select an execution" />
               </SelectTrigger>
               <SelectContent>
-                {executions.map((execution) => (
-                  <SelectItem key={execution.id} value={execution.id.toString()}>
-                    {execution.executionCode} - {execution.recipeName} (v{execution.recipeVersion}) -{' '}
-                    {execution.totalBatches} batches - {execution.status}
-                  </SelectItem>
-                ))}
+                {executions
+                  .filter((execution) => execution.status === 'PENDING')
+                  .map((execution) => (
+                    <SelectItem key={execution.id} value={execution.id.toString()}>
+                      {execution.executionCode} - {execution.recipeName} (v{execution.recipeVersion}) -{' '}
+                      {execution.totalBatches} batches - {execution.status}
+                    </SelectItem>
+                  ))}
               </SelectContent>
             </Select>
             {errors.executionId && (

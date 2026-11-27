@@ -1,19 +1,33 @@
 'use client';
 
 import { useState } from 'react';
-import { Plus, Calendar } from 'lucide-react';
+import { Plus, Calendar, Filter } from 'lucide-react';
 import { useRouter } from 'next/navigation';
+import { useQueryClient } from '@tanstack/react-query';
 
 import { Section } from '@/components/global';
 import { Button } from '@/components/ui/button';
 import { ExecutionDialog } from './ExecutionDialog';
 import { ExecutionTable } from './ExecutionTable';
 import { ExecutionItem } from '../types/execution';
-import { useExecution, useCreateExecution } from '../hooks/useExecution';
+import { useExecution, useCreateExecution, EXECUTION_QUERY_KEYS } from '../hooks/useExecution';
 import ExecutionQrPreviewModal from './ExecutionQrPreviewModal';
+import { ExecutionDetailDialog } from './ExecutionDetailDialog';
+import api from '@/lib/api';
+import { toast } from '@/hooks/use-toast';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 
 export function BulkWeighing() {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const { recipes, executions } = useExecution();
   const createExecution = useCreateExecution();
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -31,7 +45,27 @@ export function BulkWeighing() {
   const [operatorError, setOperatorError] = useState('');
   const [selectedExecution, setSelectedExecution] =
     useState<ExecutionItem | null>(null);
+  const [scheduleFilter, setScheduleFilter] = useState<'all' | 'today' | 'tomorrow'>('all');
   const [qrPreviewOpen, setQrPreviewOpen] = useState(false);
+  const today = new Date().toISOString().split('T')[0];
+  const tomorrow = new Date(Date.now() + 86400000).toISOString().split('T')[0];
+
+  const filteredExecutions = executions.filter((execution) => {
+    if (!execution.scheduledDate) return scheduleFilter === 'all';
+    if (scheduleFilter === 'today') return execution.scheduledDate === today;
+    if (scheduleFilter === 'tomorrow') return execution.scheduledDate === tomorrow;
+    return true;
+  });
+  const [detailOpen, setDetailOpen] = useState(false);
+  const [detailExecutionId, setDetailExecutionId] = useState<number | null>(null);
+  const [editOpen, setEditOpen] = useState(false);
+  const [editExecution, setEditExecution] = useState<ExecutionItem | null>(null);
+  const [editProductionBatchNumber, setEditProductionBatchNumber] = useState('');
+  const [editMasterBatchExpiringDate, setEditMasterBatchExpiringDate] = useState('');
+  const [editFinalBatchExpiringDate, setEditFinalBatchExpiringDate] = useState('');
+  const [editOperatorName, setEditOperatorName] = useState('');
+  const [deleteTarget, setDeleteTarget] = useState<ExecutionItem | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   const resetForm = () => {
     setSelectedRecipeId('');
@@ -64,7 +98,7 @@ export function BulkWeighing() {
         : 'Enter a valid number of batches.';
     const nextOperatorError = operatorName.trim()
       ? ''
-      : 'Please select an operator.';
+        : 'Please select an operator.';
 
     setRecipeError(nextRecipeError);
     setVersionError(nextVersionError);
@@ -77,8 +111,6 @@ export function BulkWeighing() {
 
     createExecution.mutate(
       {
-        // The version row id is submitted as recipeId: the backend snapshots
-        // that exact version, so no protected execution logic is touched.
         recipeId: Number(trimmedVersionId),
         totalBatches: parsedBatchCount,
         mode: 'BULK',
@@ -105,12 +137,84 @@ export function BulkWeighing() {
     console.log('Print batch QR', execution);
   };
 
+  const handleViewDetail = (execution: ExecutionItem) => {
+    setDetailExecutionId(Number(execution.id));
+    setDetailOpen(true);
+  };
+
   const handleEdit = (execution: ExecutionItem) => {
-    console.log('Edit execution', execution);
+    setEditExecution(execution);
+    setEditProductionBatchNumber(execution.productionBatchNumber || '');
+    setEditMasterBatchExpiringDate(
+      execution.masterBatchExpiringDate
+        ? new Date(execution.masterBatchExpiringDate).toISOString().split('T')[0]
+        : ''
+    );
+    setEditFinalBatchExpiringDate(
+      execution.finalBatchExpiringDate
+        ? new Date(execution.finalBatchExpiringDate).toISOString().split('T')[0]
+        : ''
+    );
+    setEditOperatorName(execution.operatorName || '');
+    setEditOpen(true);
   };
 
   const handleDelete = (execution: ExecutionItem) => {
-    console.log('Delete execution', execution);
+    setDeleteTarget(execution);
+    setConfirmDelete(true);
+  };
+
+  const handleSaveEdit = async () => {
+    if (!editExecution) return;
+
+    try {
+      await api.put(`/executions/${editExecution.id}`, {
+        productionBatchNumber: editProductionBatchNumber || null,
+        masterBatchExpiringDate: editMasterBatchExpiringDate || null,
+        finalBatchExpiringDate: editFinalBatchExpiringDate || null,
+        operatorName: editOperatorName || null,
+      });
+
+      toast({
+        title: 'Execution updated',
+        description: `Execution "${editExecution.executionNumber}" has been updated.`,
+      });
+
+      setEditOpen(false);
+      setEditExecution(null);
+      queryClient.invalidateQueries({ queryKey: EXECUTION_QUERY_KEYS.all });
+    } catch (err: any) {
+      toast({
+        title: 'Update failed',
+        description: err?.response?.data?.message || 'Failed to update execution.',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!deleteTarget) return;
+
+    try {
+      await api.delete(`/executions/${deleteTarget.id}`);
+
+      toast({
+        title: 'Execution deleted',
+        description: `Execution "${deleteTarget.executionNumber}" has been deleted.`,
+      });
+
+      setConfirmDelete(false);
+      setDeleteTarget(null);
+      queryClient.invalidateQueries({ queryKey: EXECUTION_QUERY_KEYS.all });
+    } catch (err: any) {
+      toast({
+        title: 'Delete failed',
+        description: err?.response?.data?.message || 'Failed to delete execution.',
+        variant: 'destructive',
+      });
+      setConfirmDelete(false);
+      setDeleteTarget(null);
+    }
   };
 
   return (
@@ -119,6 +223,21 @@ export function BulkWeighing() {
       description="Create and manage bulk weighing executions"
     >
       <div className="flex justify-end gap-2">
+        <div className="flex items-center gap-2">
+          <Label htmlFor="schedule-filter" className="text-sm text-gray-600 mr-1">
+            Filter:
+          </Label>
+          <select
+            id="schedule-filter"
+            value={scheduleFilter}
+            onChange={(e) => setScheduleFilter(e.target.value as 'all' | 'today' | 'tomorrow')}
+            className="border border-gray-300 rounded px-2 py-1 text-sm bg-white"
+          >
+            <option value="all">All Executions</option>
+            <option value="today">Scheduled Today</option>
+            <option value="tomorrow">Scheduled Tomorrow</option>
+          </select>
+        </div>
         <Button
           className="bg-green-600 hover:bg-green-700 text-white"
           onClick={() => router.push('/schedules')}
@@ -136,13 +255,14 @@ export function BulkWeighing() {
       </div>
 
       <div className="mt-6">
-        <ExecutionTable
-          executions={executions}
-          onPrintAll={handlePrintAll}
-          onPrintBatch={handlePrintBatch}
-          onEdit={handleEdit}
-          onDelete={handleDelete}
-        />
+      <ExecutionTable
+        executions={filteredExecutions}
+        onPrintAll={handlePrintAll}
+        onPrintBatch={handlePrintBatch}
+        onEdit={handleEdit}
+        onDelete={handleDelete}
+        onViewDetail={handleViewDetail}
+      />
       </div>
 
 <ExecutionDialog
@@ -213,6 +333,94 @@ export function BulkWeighing() {
           setSelectedExecution(null);
         }}
       />
+      <ExecutionDetailDialog
+        open={detailOpen}
+        onOpenChange={(open) => {
+          setDetailOpen(open);
+          if (!open) {
+            setDetailExecutionId(null);
+          }
+        }}
+        executionId={detailExecutionId}
+      />
+
+      {/* Edit Execution Dialog */}
+      <Dialog open={editOpen} onOpenChange={setEditOpen}>
+        <DialogContent className="sm:max-w-md bg-white">
+          <DialogHeader>
+            <DialogTitle>Edit Execution</DialogTitle>
+          </DialogHeader>
+          <form onSubmit={(e) => { e.preventDefault(); handleSaveEdit(); }} className="space-y-4">
+            <div className="space-y-2">
+              <Label>Execution Number</Label>
+              <Input value={editExecution?.executionNumber || ''} readOnly className="bg-gray-100" />
+            </div>
+            <div className="space-y-2">
+              <Label>Production Batch Number</Label>
+              <Input
+                type="text"
+                value={editProductionBatchNumber}
+                onChange={(e) => setEditProductionBatchNumber(e.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Master Batch Expiry Date</Label>
+              <Input
+                type="date"
+                value={editMasterBatchExpiringDate}
+                onChange={(e) => setEditMasterBatchExpiringDate(e.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Final Batch Expiry Date</Label>
+              <Input
+                type="date"
+                value={editFinalBatchExpiringDate}
+                onChange={(e) => setEditFinalBatchExpiringDate(e.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Operator Name</Label>
+              <Input
+                type="text"
+                value={editOperatorName}
+                onChange={(e) => setEditOperatorName(e.target.value)}
+              />
+            </div>
+          </form>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setEditOpen(false)}>
+              Cancel
+            </Button>
+            <Button type="submit" onClick={handleSaveEdit}>
+              Save Changes
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Confirmation Dialog */}
+      <Dialog open={confirmDelete} onOpenChange={() => setConfirmDelete(false)}>
+        <DialogContent className="sm:max-w-sm bg-white">
+          <DialogHeader>
+            <DialogTitle>Delete Execution</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <p>
+              Are you sure you want to delete execution{" "}
+              <strong>{deleteTarget?.executionNumber}</strong>? This action cannot be undone.
+            </p>
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setConfirmDelete(false)}>
+              Cancel
+            </Button>
+            <Button type="button" variant="destructive" onClick={handleConfirmDelete}>
+              Delete
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </Section>
   );
 }

@@ -1,15 +1,22 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+  ForbiddenException,
+} from '@nestjs/common';
 import {
   ExecutionStatus,
   BatchExecutionStatus,
   BatchProcessStatus,
   IngredientExecutionStatus,
   StepType,
+  ScheduleStatus,
 } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateExecutionDto } from './dto/create-execution.dto';
 import { generateExecutionCode } from '../common/utils/code-generator';
 import { buildExecutionIngredients } from './utils/execution-builder';
+import { startOfDay, isAfter, isBefore } from 'date-fns';
 
 @Injectable()
 export class ExecutionService {
@@ -248,6 +255,26 @@ export class ExecutionService {
         throw new BadRequestException('Execution can only be started from CREATED status.');
       }
 
+      // Schedule check: if execution has a pending/expired schedule, it can only
+      // be started on or after the scheduled date.
+      const pendingSchedules = execution.schedules.filter(
+        (s) => s.status === ScheduleStatus.PENDING || s.status === ScheduleStatus.EXPIRED,
+      );
+      if (pendingSchedules.length > 0) {
+        const today = startOfDay(new Date());
+        for (const schedule of pendingSchedules) {
+          const scheduleDay = startOfDay(schedule.scheduleDate);
+          if (!isBefore(today, scheduleDay)) {
+            // Schedule date has arrived or passed; execution can start now (schedule becomes expired via refresh)
+            continue;
+          }
+          const formattedDate = schedule.scheduleDate.toISOString().slice(0, 10);
+          throw new BadRequestException(
+            `This execution is scheduled for ${formattedDate}. It cannot be started before the scheduled date.`,
+          );
+        }
+      }
+
       // Validate bin quantities
       const validationResult = await this.validateBinQuantitiesForStart(tx, execution);
       
@@ -291,6 +318,198 @@ export class ExecutionService {
         },
       };
     });
+  }
+
+  async getExecutionDetail(executionId: number) {
+    const execution = await this.prisma.execution.findUnique({
+      where: { id: executionId },
+      include: {
+        recipe: true,
+        operator: {
+          select: { id: true, name: true, username: true },
+        },
+        schedules: {
+          include: {
+            operator: {
+              select: { id: true, name: true, username: true },
+            },
+            createdBy: {
+              select: { id: true, name: true, username: true },
+            },
+          },
+          orderBy: { scheduleDate: 'asc' },
+        },
+        batches: {
+          select: {
+            id: true,
+            batchNumber: true,
+            status: true,
+          },
+          orderBy: { batchNumber: 'asc' },
+        },
+      },
+    });
+
+    if (!execution) {
+      throw new NotFoundException('Execution not found.');
+    }
+
+    const today = startOfDay(new Date());
+    const schedulesWithStatus = execution.schedules.map((schedule) => {
+      let calcStatus = schedule.status;
+      if (execution.status === 'COMPLETED') {
+        calcStatus = 'SUCCESS';
+      } else if (isAfter(today, startOfDay(schedule.scheduleDate))) {
+        calcStatus = 'EXPIRED';
+      } else {
+        calcStatus = 'PENDING';
+      }
+      return {
+        id: schedule.id,
+        scheduleCode: schedule.scheduleCode,
+        scheduleDate: schedule.scheduleDate,
+        operatorName: schedule.operator?.name ?? '',
+        operatorUsername: schedule.operator?.username ?? '',
+        createdByName: schedule.createdBy?.name ?? '',
+        status: calcStatus,
+        createdAt: schedule.createdAt,
+      };
+    });
+
+    return {
+      id: execution.id,
+      executionCode: execution.executionCode,
+      recipeId: execution.recipeId,
+      recipeName: execution.recipeName,
+      recipeVersion: execution.recipeVersion,
+      mode: execution.mode,
+      totalBatches: execution.totalBatches,
+      status: execution.status,
+      operatorName: execution.operator?.name ?? '',
+      operatorUsername: execution.operator?.username ?? '',
+      productionBatchNumber: execution.productionBatchNumber,
+      masterBatchExpiringDate: execution.masterBatchExpiringDate,
+      finalBatchExpiringDate: execution.finalBatchExpiringDate,
+      createdAt: execution.createdAt,
+      updatedAt: execution.updatedAt,
+      schedules: schedulesWithStatus,
+      batches: execution.batches.map((b) => ({
+        id: b.id,
+        batchNumber: b.batchNumber,
+        status: b.status,
+      })),
+    };
+  }
+
+  async updateExecution(
+    executionId: number,
+    data: {
+      productionBatchNumber?: string;
+      masterBatchExpiringDate?: string | null;
+      finalBatchExpiringDate?: string | null;
+      operatorName?: string;
+      totalBatches?: number;
+    }
+  ) {
+    const execution = await this.prisma.execution.findUnique({
+      where: { id: executionId },
+      include: {
+        schedules: true,
+        batches: true,
+      },
+    });
+
+    if (!execution) {
+      throw new NotFoundException('Execution not found.');
+    }
+
+    if (execution.status !== 'PENDING') {
+      throw new BadRequestException(
+        `Cannot edit execution "${execution.executionCode}" — it is already ${execution.status.toLowerCase()}.`
+      );
+    }
+
+    if (execution.schedules.length > 0) {
+      throw new BadRequestException(
+        `Cannot edit execution "${execution.executionCode}" — it is already scheduled.`
+      );
+    }
+
+    const updateData: any = {};
+    if (data.productionBatchNumber !== undefined) {
+      updateData.productionBatchNumber = data.productionBatchNumber || null;
+    }
+    if (data.masterBatchExpiringDate !== undefined) {
+      updateData.masterBatchExpiringDate =
+        data.masterBatchExpiringDate
+          ? new Date(data.masterBatchExpiringDate)
+          : null;
+    }
+    if (data.finalBatchExpiringDate !== undefined) {
+      updateData.finalBatchExpiringDate =
+        data.finalBatchExpiringDate
+          ? new Date(data.finalBatchExpiringDate)
+          : null;
+    }
+    if (data.operatorName !== undefined) {
+      updateData.operatorName = data.operatorName || null;
+    }
+    if (data.totalBatches !== undefined) {
+      updateData.totalBatches = data.totalBatches;
+    }
+
+    const updated = await this.prisma.execution.update({
+      where: { id: executionId },
+      data: updateData,
+    });
+
+    return {
+      message: 'Execution updated successfully.',
+      execution: {
+        id: updated.id,
+        executionCode: updated.executionCode,
+        status: updated.status,
+        productionBatchNumber: updated.productionBatchNumber,
+        masterBatchExpiringDate: updated.masterBatchExpiringDate,
+        finalBatchExpiringDate: updated.finalBatchExpiringDate,
+        operatorName: updated.operatorName,
+        totalBatches: updated.totalBatches,
+      },
+    };
+  }
+
+  async deleteExecution(executionId: number) {
+    const execution = await this.prisma.execution.findUnique({
+      where: { id: executionId },
+      include: {
+        schedules: true,
+        batches: true,
+      },
+    });
+
+    if (!execution) {
+      throw new NotFoundException('Execution not found.');
+    }
+
+    if (execution.status !== 'PENDING') {
+      throw new BadRequestException(
+        `Cannot delete execution "${execution.executionCode}" — it is already ${execution.status.toLowerCase()}.`
+      );
+    }
+
+    if (execution.schedules.length > 0) {
+      throw new BadRequestException(
+        `Cannot delete execution "${execution.executionCode}" — it is already scheduled.`
+      );
+    }
+
+    await this.prisma.execution.delete({
+      where: { id: executionId },
+    });
+
+    return {
+      message: `Execution "${execution.executionCode}" deleted successfully.`,
+    };
   }
 
   private async validateBinQuantitiesForStart(

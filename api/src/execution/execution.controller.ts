@@ -1,10 +1,12 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   ParseIntPipe,
   Post,
+  Put,
   UseGuards,
   Req,
 } from '@nestjs/common';
@@ -68,5 +70,30 @@ export class ExecutionController {
   )
   getTracking(@Param('id', ParseIntPipe) id: number) {
     return this.executionService.getTracking(id);
+  }
+
+  @Get(':id/detail')
+  @Roles(
+    UserRole.RUBBER_TECHNOLOGIST,
+    UserRole.OPERATOR,
+    UserRole.QUALITY_CONTROL,
+  )
+  getExecutionDetail(@Param('id', ParseIntPipe) id: number) {
+    return this.executionService.getExecutionDetail(id);
+  }
+
+  @Put(':id')
+  @Roles(UserRole.RUBBER_TECHNOLOGIST)
+  updateExecution(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: any
+  ) {
+    return this.executionService.updateExecution(id, dto);
+  }
+
+  @Delete(':id')
+  @Roles(UserRole.RUBBER_TECHNOLOGIST)
+  deleteExecution(@Param('id', ParseIntPipe) id: number) {
+    return this.executionService.deleteExecution(id);
   }
 }
